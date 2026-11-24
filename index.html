@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Image to Litematic</title>
+<style>
+:root{--bg:#f6f6f4;--fg:#1c1c1a;--card:#fff;--line:#d8d8d2;--accent:#2f7d32;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171917;--fg:#ececE6;--card:#222522;--line:#3a3d3a;--accent:#6fcf74}}
+:root[data-theme="dark"]{--bg:#171917;--fg:#ececE6;--card:#222522;--line:#3a3d3a;--accent:#6fcf74}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px}
+h1{font-size:1.5rem;margin:0 0 4px}
+p.sub{margin:0 0 20px;opacity:.7}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+label{display:block;font-size:.85rem;opacity:.75;margin:10px 0 4px}
+input[type=text],select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit}
+.row{display:flex;gap:12px;flex-wrap:wrap}.row>div{flex:1;min-width:150px}
+button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+canvas{width:100%;max-width:512px;image-rendering:pixelated;border:1px solid var(--line);border-radius:8px;display:block;margin:8px auto;background:#000}
+.chk{display:flex;align-items:center;gap:8px;margin-top:12px}
+#msg{font-size:.9rem;opacity:.8;margin-top:8px}
+h2{font-size:1.05rem;margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line)}
+th:nth-child(n+2),td:nth-child(n+2){text-align:right}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:8px;vertical-align:-1px;border:1px solid var(--line)}
+#three{width:100%;height:380px;border-radius:8px;overflow:hidden;background:#101210;touch-action:none;cursor:grab}
+#three canvas{display:block}
+.hint{font-size:.8rem;opacity:.65;margin-top:6px}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--line);margin-top:10px}
+</style>
+</head>
+<body>
+<main>
+<h1>Image → Litematic</h1>
+<p class="sub">128×128 map-art schematic. Everything runs in your browser; nothing is uploaded.</p>
+
+<div class="card">
+  <input type="file" id="file" accept="image/*">
+  <div class="row">
+    <div><label for="fit">Fit</label>
+      <select id="fit"><option value="crop">Crop to fill</option><option value="stretch">Stretch</option><option value="fit">Fit (black bars)</option></select></div>
+    <div><label for="name">Schematic name</label><input type="text" id="name" value="map_art"></div>
+  </div>
+  <div class="chk"><input type="checkbox" id="stairs"><label for="stairs" style="margin:0;opacity:1">3D shading (staircase): ~3x more colors, uneven heights</label></div>
+  <div class="chk"><input type="checkbox" id="cheap"><label for="cheap" style="margin:0;opacity:1">Cheap Build (for economy servers)</label></div>
+</div>
+
+<div class="card">
+  <canvas id="prev" width="128" height="128"></canvas>
+  <button id="dl" disabled>Download .litematic</button>
+  <div id="msg">Pick an image to start.</div>
+</div>
+<div class="card"><h2>Materials</h2><div id="mats">Pick an image to see the list.</div><button class="sec" id="copy" disabled>Copy list</button></div>
+<div class="card"><h2>3D preview</h2><div id="three"></div><div class="hint">Shows the build with block colors and lighting. Drag to rotate, scroll to zoom.</div></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+// Map base colors (flat = "normal" shade, x220/255) with a placeable block each.
+const BASE=[
+[127,178,56,"grass_block"],[247,233,163,"sandstone"],[167,167,167,"iron_block"],[255,0,0,"redstone_block"],[160,160,255,"packed_ice"],
+[255,255,255,"snow_block"],[164,168,184,"clay"],[151,109,77,"dirt"],[112,112,112,"stone"],[143,119,72,"oak_planks"],
+[255,252,245,"quartz_block"],[216,127,51,"orange_concrete"],[178,76,216,"magenta_concrete"],[102,153,216,"light_blue_concrete"],
+[229,229,51,"yellow_concrete"],[127,204,25,"lime_concrete"],[242,127,165,"pink_concrete"],[76,76,76,"gray_concrete"],
+[153,153,153,"light_gray_concrete"],[76,127,153,"cyan_concrete"],[127,63,178,"purple_concrete"],[51,76,178,"blue_concrete"],
+[102,76,51,"brown_concrete"],[102,127,51,"green_concrete"],[153,51,51,"red_concrete"],[25,25,25,"black_concrete"],
+[250,238,77,"gold_block"],[92,219,213,"diamond_block"],[74,128,255,"lapis_block"],[0,217,58,"emerald_block"],
+[129,86,49,"podzol"],[112,2,0,"netherrack"],
+[209,177,161,"white_terracotta"],[159,82,36,"orange_terracotta"],[149,87,108,"magenta_terracotta"],[112,108,138,"light_blue_terracotta"],
+[186,133,36,"yellow_terracotta"],[103,117,53,"lime_terracotta"],[160,77,78,"pink_terracotta"],[57,41,35,"gray_terracotta"],
+[135,107,98,"light_gray_terracotta"],[87,92,92,"cyan_terracotta"],[122,73,88,"purple_terracotta"],[76,62,92,"blue_terracotta"],
+[76,50,35,"brown_terracotta"],[76,82,42,"green_terracotta"],[142,60,46,"red_terracotta"],[37,22,16,"black_terracotta"],
+[189,48,49,"crimson_nylium"],[148,63,97,"crimson_planks"],[22,126,134,"warped_nylium"],[58,142,140,"warped_planks"],
+[20,180,133,"warped_wart_block"],[100,100,100,"deepslate"],[216,175,147,"raw_iron_block"]
+].map(([r,g,b,n])=>({raw:[r,g,b],n}));
+// Candidates: shade s=0 flat (220), +1 higher than north neighbor (255), -1 lower (180)
+const SH={"-1":180,"0":220,"1":255};
+// Skipped by Cheap Build: precious blocks and ones that need silk touch / Nether trips
+const EXP=new Set(["gold_block","diamond_block","emerald_block","lapis_block","iron_block","raw_iron_block","redstone_block","quartz_block","packed_ice","grass_block","podzol","crimson_nylium","warped_nylium","warped_wart_block","crimson_planks","warped_planks"]);
+function cands(stairs){const o=[];const cheap=document.getElementById('cheap').checked;BASE.forEach((b,i)=>{if(cheap&&EXP.has(b.n))return;for(const sh of(stairs?[-1,0,1]:[0])){const f=SH[sh]/255;o.push({c:[b.raw[0]*f,b.raw[1]*f,b.raw[2]*f],base:i,s:sh})}});return o}
+let CAND=cands(false);
+
+const N=128, DATA_VERSION=3953; // Minecraft 1.21
+let img=null, grid=null;
+const $=id=>document.getElementById(id);
+
+function nearest(r,g,b){
+  let best=0,bd=1e18;
+  for(let i=0;i<CAND.length;i++){
+    const c=CAND[i].c, rm=(r+c[0])/2, dr=r-c[0], dg=g-c[1], db=b-c[2];
+    const d=(2+rm/256)*dr*dr+4*dg*dg+(2+(255-rm)/256)*db*db;
+    if(d<bd){bd=d;best=i}
+  }
+  return best;
+}
+
+function process(){
+  if(!img) return;
+  const cv=document.createElement('canvas'); cv.width=cv.height=N;
+  const x=cv.getContext('2d'); x.imageSmoothingQuality='high'; x.imageSmoothingEnabled=!(img.width<=N&&img.height<=N);
+  x.fillStyle='#000'; x.fillRect(0,0,N,N);
+  const w=img.width,h=img.height,mode=$('fit').value;
+  if(mode==='stretch') x.drawImage(img,0,0,N,N);
+  else{
+    const s=mode==='crop'?Math.max(N/w,N/h):Math.min(N/w,N/h);
+    x.drawImage(img,(N-w*s)/2,(N-h*s)/2,w*s,h*s);
+  }
+  const px=x.getImageData(0,0,N,N).data;
+  CAND=cands($('stairs').checked);
+  grid=new Uint16Array(N*N);
+  const out=$('prev').getContext('2d'), od=out.createImageData(N,N);
+  for(let i=0;i<N*N;i++){
+    const k=nearest(px[i*4],px[i*4+1],px[i*4+2]); grid[i]=k;
+    const c=CAND[k].c;
+    od.data[i*4]=c[0];od.data[i*4+1]=c[1];od.data[i*4+2]=c[2];od.data[i*4+3]=255;
+  }
+  out.putImageData(od,0,0);
+  $('dl').disabled=false;renderMaterials();render3D();
+  const d=dims();$('msg').textContent='Ready. Size: '+d.sx+' × '+d.H+' × '+d.sz+' blocks (X × Y × Z).';
+}
+
+// ---- NBT writer ----
+class W{
+  constructor(){this.a=[]}
+  u8(v){this.a.push(v&255)}
+  i16(v){this.u8(v>>8);this.u8(v)}
+  i32(v){this.u8(v>>24);this.u8(v>>16);this.u8(v>>8);this.u8(v)}
+  i64(v){v=BigInt.asUintN(64,BigInt(v));for(let s=56n;s>=0n;s-=8n)this.u8(Number((v>>s)&255n))}
+  str(s){const b=new TextEncoder().encode(s);this.i16(b.length);b.forEach(x=>this.u8(x))}
+  tag(t,name){this.u8(t);this.str(name)}
+}
+const T={int:(w,n,v)=>{w.tag(3,n);w.i32(v)},long:(w,n,v)=>{w.tag(4,n);w.i64(v)},str:(w,n,v)=>{w.tag(8,n);w.str(v)},
+  begin:(w,n)=>w.tag(10,n),end:w=>w.u8(0)};
+const vec=(w,n,x,y,z)=>{T.begin(w,n);T.int(w,'x',x);T.int(w,'y',y);T.int(w,'z',z);T.end(w)};
+
+// ---- Materials ----
+const pretty=n=>n.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase());
+const stk=c=>{const s=Math.floor(c/64),r=c%64;return s?s+' stacks'+(r?' + '+r:''):r+''};
+function matList(){
+  const m=new Map();
+  for(const k of grid){const n=BASE[CAND[k].base].n;m.set(n,(m.get(n)||0)+1)}
+  if($('stairs').checked)m.set('cobblestone',(m.get('cobblestone')||0)+N);
+  return [...m].sort((a,b)=>b[1]-a[1]);
+}
+function renderMaterials(){
+  const list=matList(), total=list.reduce((a,x)=>a+x[1],0);
+  const col=n=>{const b=BASE.find(x=>x.n===n);return b?b.raw:[127,127,127]};
+  $('mats').innerHTML='<table><tr><th>Block</th><th>Count</th><th>Stacks</th></tr>'+
+    list.map(([n,c])=>{const k=col(n);return '<tr><td><span class="sw" style="background:rgb('+k+')"></span>'+pretty(n)+'</td><td>'+c+'</td><td>'+stk(c)+'</td></tr>'}).join('')+
+    '<tr><th>Total</th><th>'+total+'</th><th>'+Math.ceil(total/1728)+' shulker boxes</th></tr></table>';
+  $('copy').disabled=false;
+}
+$('copy').addEventListener('click',async()=>{
+  const list=matList(), total=list.reduce((a,x)=>a+x[1],0);
+  const t=list.map(([n,c])=>pretty(n)+': '+c+' ('+stk(c)+')').join('\n')+'\nTotal: '+total;
+  try{await navigator.clipboard.writeText(t);$('msg').textContent='Material list copied.'}catch(e){$('msg').textContent='Copy was blocked here. Select the table text instead.'}
+});
+
+// ---- 3D preview ----
+let R,scene,cam,mesh,geo,ctr,rotY=0,rotX=1.0,dist=220;
+function draw(){if(!R)return;cam.position.set(ctr.x+dist*Math.sin(rotY)*Math.cos(rotX),ctr.y+dist*Math.sin(rotX),ctr.z+dist*Math.cos(rotY)*Math.cos(rotX));cam.lookAt(ctr);R.render(scene,cam)}
+function render3D(){
+  const box=$('three');
+  try{
+    if(typeof THREE==='undefined')throw new Error('3D library did not load');
+    const d=dims(), stairs=d.stairs;
+    if(!R){
+      R=new THREE.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(box.clientWidth,box.clientHeight);box.appendChild(R.domElement);
+      scene=new THREE.Scene();cam=new THREE.PerspectiveCamera(40,box.clientWidth/box.clientHeight,1,2000);
+      scene.add(new THREE.AmbientLight(0xffffff,0.6));const L=new THREE.DirectionalLight(0xffffff,0.8);L.position.set(-60,120,90);scene.add(L);
+      geo=new THREE.BoxGeometry(1,1,1);
+      let drag=false,px=0,py=0;
+      box.addEventListener('pointerdown',e=>{drag=true;px=e.clientX;py=e.clientY;box.setPointerCapture(e.pointerId)});
+      box.addEventListener('pointerup',()=>drag=false);
+      box.addEventListener('pointermove',e=>{if(!drag)return;rotY-=(e.clientX-px)*0.008;rotX=Math.max(0.05,Math.min(1.5,rotX+(e.clientY-py)*0.008));px=e.clientX;py=e.clientY;draw()});
+      box.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(30,Math.min(600,dist*(e.deltaY>0?1.1:0.9)));draw()},{passive:false});
+    }
+    if(mesh){scene.remove(mesh);mesh.dispose()}
+    const cnt=N*N+(stairs?N:0);
+    mesh=new THREE.InstancedMesh(geo,new THREE.MeshLambertMaterial(),cnt);
+    const o=new THREE.Object3D(),c=new THREE.Color();let i=0;
+    const put=(x,y,z,rgb)=>{o.position.set(x+0.5,y+0.5,z+0.5);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);c.setRGB(rgb[0]/255,rgb[1]/255,rgb[2]/255);mesh.setColorAt(i,c);i++};
+    if(stairs)for(let x=0;x<N;x++)put(x,-d.mn,0,[127,127,127]);
+    for(let z=0;z<N;z++)for(let x=0;x<N;x++){const k=z*N+x;put(x,stairs?d.hArr[k]-d.mn:0,stairs?z+1:z,BASE[CAND[grid[k]].base].raw)}
+    mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;scene.add(mesh);
+    ctr=new THREE.Vector3(N/2,d.H/2,d.sz/2);draw();
+  }catch(e){box.textContent='3D preview is not available here: '+e.message}
+}
+
+function dims(){
+  const stairs=$('stairs').checked, hArr=new Int32Array(N*N);
+  let mn=0,mx=0;
+  if(stairs)for(let x=0;x<N;x++){let cur=0;for(let z=0;z<N;z++){cur+=CAND[grid[z*N+x]].s;hArr[z*N+x]=cur;if(cur<mn)mn=cur;if(cur>mx)mx=cur}}
+  return {stairs,hArr,mn,sx:N,sz:stairs?N+1:N,H:stairs?mx-mn+1:1};
+}
+
+function buildLitematic(name){
+  const {stairs,hArr,mn,sx,sz,H}=dims();
+  const palette=['air',...new Set(['cobblestone',...[...grid].map(k=>BASE[CAND[k].base].n)])];
+  const pidx=new Map(palette.map((p,i)=>[p,i]));
+  const bits=Math.max(2,Math.ceil(Math.log2(palette.length)));
+  const total=sx*sz*H, longs=Math.ceil(total*bits/64), arr=new Array(longs).fill(0n);
+  let count=0;
+  const put=(x,y,zi,v)=>{
+    const i=y*sx*sz+zi*sx+x, bi=i*bits, l=bi>>6, off=bi&63, V=BigInt(v);
+    arr[l]=BigInt.asUintN(64,arr[l]|(V<<BigInt(off)));
+    if(off+bits>64) arr[l+1]=BigInt.asUintN(64,arr[l+1]|(V>>BigInt(64-off)));
+    count++;
+  };
+  if(stairs)for(let x=0;x<N;x++)put(x,-mn,0,pidx.get('cobblestone')); // reference row north of the map
+  for(let z=0;z<N;z++)for(let x=0;x<N;x++){
+    const k=z*N+x, v=pidx.get(BASE[CAND[grid[k]].base].n);
+    put(x,stairs?hArr[k]-mn:0,stairs?z+1:z,v);
+  }
+  const w=new W(), now=Date.now();
+  T.begin(w,'');
+  T.int(w,'MinecraftDataVersion',DATA_VERSION);
+  T.int(w,'Version',6);
+  T.begin(w,'Metadata');
+  vec(w,'EnclosingSize',sx,H,sz);
+  T.str(w,'Author','Image to Litematic');T.str(w,'Description','');T.str(w,'Name',name);
+  T.int(w,'RegionCount',1);T.long(w,'TimeCreated',now);T.long(w,'TimeModified',now);
+  T.int(w,'TotalBlocks',count);T.int(w,'TotalVolume',total);
+  T.end(w);
+  T.begin(w,'Regions');T.begin(w,name);
+  vec(w,'Position',0,0,0);vec(w,'Size',sx,H,sz);
+  w.tag(9,'BlockStatePalette');w.u8(10);w.i32(palette.length);
+  palette.forEach(p=>{T.str(w,'Name','minecraft:'+p);T.end(w)});
+  w.tag(12,'BlockStates');w.i32(longs);arr.forEach(v=>w.i64(v));
+  for(const n of ['TileEntities','Entities','PendingBlockTicks','PendingFluidTicks']){w.tag(9,n);w.u8(10);w.i32(0)}
+  T.end(w);T.end(w);T.end(w);
+  return new Uint8Array(w.a);
+}
+
+async function gzip(bytes){
+  const s=new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+
+$('file').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const im=new Image();
+  im.onload=()=>{img=im;process()};
+  im.src=URL.createObjectURL(f);
+  const base=f.name.replace(/\.[^.]+$/,'').replace(/[^\w-]/g,'_');
+  if(base) $('name').value=base;
+});
+$('fit').addEventListener('change',process);
+$('stairs').addEventListener('change',process);
+$('cheap').addEventListener('change',process);
+$('dl').addEventListener('click',async()=>{
+  const name=($('name').value||'map_art').replace(/[^\w-]/g,'_');
+  try{
+    const data=await gzip(buildLitematic(name));
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
+    a.download=name+'.litematic';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+    $('msg').textContent='Saved '+name+'.litematic. Put it in your .minecraft/schematics folder.';
+  }catch(e){$('msg').textContent='Could not create the file: '+((e&&e.message)||e)}
+});
+</script>
+</body>
+</html>
